@@ -1,0 +1,197 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny all unmatched reads and writes by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Shared global helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    // Domain validation helpers
+    function isValidSiteProject(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+             data.prompt is string && data.prompt.size() >= 1 && data.prompt.size() <= 1500 &&
+             data.category is string && data.category in ['landing', 'portfolio', 'saas', 'store', 'blog'] &&
+             data.htmlContent is string && data.htmlContent.size() >= 1 && data.htmlContent.size() <= 150000 &&
+             data.summary is string && data.summary.size() <= 500 &&
+             data.subdomain is string && data.subdomain.size() >= 3 && data.subdomain.size() <= 64 && data.subdomain.matches('^[a-z0-9-]+$') &&
+             data.hostingTier is string && data.hostingTier in ['free', 'pro', 'enterprise'] &&
+             data.deployStatus is string && data.deployStatus in ['draft', 'deployed'] &&
+             data.deployedUrl is string && data.deployedUrl.size() <= 250 &&
+             data.customDomain is string && data.customDomain.size() <= 120 &&
+             data.sslEnabled is bool &&
+             data.deployCount is int && data.deployCount >= 0 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidDeploymentRecord(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             isValidId(data.siteId) &&
+             data.siteTitle is string && data.siteTitle.size() >= 1 && data.siteTitle.size() <= 100 &&
+             data.deployedUrl is string && data.deployedUrl.size() >= 1 && data.deployedUrl.size() <= 250 &&
+             data.hostingTier is string && data.hostingTier in ['free', 'pro', 'enterprise'] &&
+             data.paymentOrderId is string && data.paymentOrderId.size() <= 128 &&
+             data.amountUsdCents is int && data.amountUsdCents >= 0 &&
+             data.status is string && data.status in ['active', 'rolled_back'] &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidHostingSubscription(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.planId is string && data.planId in ['starter_free', 'pro_monthly', 'enterprise_monthly'] &&
+             data.planName is string && data.planName.size() >= 1 && data.planName.size() <= 80 &&
+             data.priceUsdCents is int && data.priceUsdCents >= 0 &&
+             data.currencyCode is string && data.currencyCode in ['USD'] &&
+             data.paymentNetwork is string && data.paymentNetwork.size() >= 1 && data.paymentNetwork.size() <= 80 &&
+             data.paymentTokenSummary is string && data.paymentTokenSummary.size() >= 1 && data.paymentTokenSummary.size() <= 160 &&
+             data.status is string && data.status in ['active', 'cancelled'] &&
+             data.customDomainsLimit is int && data.customDomainsLimit >= 0 && data.customDomainsLimit <= 100 &&
+             data.bandwidthGb is int && data.bandwidthGb >= 10 && data.bandwidthGb <= 10000 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    match /users/{userId} {
+      // User-owned AI Site Projects
+      match /sites/{siteId} {
+        allow get: if isSignedIn() && isOwner(userId) && isValidId(siteId);
+        allow list: if isSignedIn() && isOwner(userId);
+
+        allow create: if isSignedIn() &&
+                         isOwner(userId) &&
+                         isValidId(siteId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'title', 'prompt', 'category', 'htmlContent',
+                           'summary', 'subdomain', 'hostingTier', 'deployStatus',
+                           'deployedUrl', 'customDomain', 'sslEnabled', 'deployCount',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'prompt', 'category', 'htmlContent',
+                           'summary', 'subdomain', 'hostingTier', 'deployStatus',
+                           'deployedUrl', 'customDomain', 'sslEnabled', 'deployCount',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidSiteProject(incoming(), userId);
+
+        allow update: if isSignedIn() &&
+                         isOwner(userId) &&
+                         isValidId(siteId) &&
+                         isValidSiteProject(incoming(), userId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'prompt', 'category', 'htmlContent',
+                           'summary', 'subdomain', 'hostingTier', 'deployStatus',
+                           'deployedUrl', 'customDomain', 'sslEnabled', 'deployCount',
+                           'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() && isOwner(userId) && isValidId(siteId);
+      }
+
+      // User-owned Deployment Audit Records
+      match /deployments/{deploymentId} {
+        allow get: if isSignedIn() && isOwner(userId) && isValidId(deploymentId);
+        allow list: if isSignedIn() && isOwner(userId);
+
+        allow create: if isSignedIn() &&
+                         isOwner(userId) &&
+                         isValidId(deploymentId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'siteId', 'siteTitle', 'deployedUrl',
+                           'hostingTier', 'paymentOrderId', 'amountUsdCents',
+                           'status', 'createdAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'siteId', 'siteTitle', 'deployedUrl',
+                           'hostingTier', 'paymentOrderId', 'amountUsdCents',
+                           'status', 'createdAt'
+                         ]) &&
+                         isValidDeploymentRecord(incoming(), userId);
+
+        // Terminal state lock: once rolled_back, no further updates allowed
+        allow update: if isSignedIn() &&
+                         isOwner(userId) &&
+                         isValidId(deploymentId) &&
+                         isValidDeploymentRecord(incoming(), userId) &&
+                         existing().status == 'active' &&
+                         incoming().userId == existing().userId &&
+                         incoming().siteId == existing().siteId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+
+        allow delete: if isSignedIn() && isOwner(userId) && isValidId(deploymentId);
+      }
+
+      // User-owned Google Pay Hosting Subscriptions
+      match /subscriptions/{subscriptionId} {
+        allow get: if isSignedIn() && isOwner(userId) && isValidId(subscriptionId);
+        allow list: if isSignedIn() && isOwner(userId);
+
+        allow create: if isSignedIn() &&
+                         isOwner(userId) &&
+                         isValidId(subscriptionId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'planId', 'planName', 'priceUsdCents',
+                           'currencyCode', 'paymentNetwork', 'paymentTokenSummary',
+                           'status', 'customDomainsLimit', 'bandwidthGb',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'planId', 'planName', 'priceUsdCents',
+                           'currencyCode', 'paymentNetwork', 'paymentTokenSummary',
+                           'status', 'customDomainsLimit', 'bandwidthGb',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidHostingSubscription(incoming(), userId);
+
+        // Terminal state lock: once cancelled, subscription cannot be reactivated in-place
+        allow update: if isSignedIn() &&
+                         isOwner(userId) &&
+                         isValidId(subscriptionId) &&
+                         isValidHostingSubscription(incoming(), userId) &&
+                         existing().status == 'active' &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'planId', 'planName', 'priceUsdCents', 'currencyCode',
+                           'paymentNetwork', 'paymentTokenSummary', 'status',
+                           'customDomainsLimit', 'bandwidthGb', 'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() && isOwner(userId) && isValidId(subscriptionId);
+      }
+    }
+  }
+}

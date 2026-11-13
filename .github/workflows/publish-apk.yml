@@ -1,0 +1,76 @@
+name: Build & Publish Flux Sites APK
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ "v*", "[0-9]*" ]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag (e.g. v1.0.0). Leave blank to auto-number."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare debug keystore
+        run: |
+          if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Build Debug APK
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Stage branded APK asset
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${{ inputs.tag_name }}" ]; then
+              TAG="${{ inputs.tag_name }}"
+            else
+              TAG="v1.0.${GITHUB_RUN_NUMBER}"
+            fi
+          fi
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          cp app/build/outputs/apk/debug/app-debug.apk "flux-sites-${TAG}.apk"
+
+      - name: Upload APK workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flux-sites-apk
+          path: flux-sites-*.apk
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Flux Sites ${{ env.RELEASE_TAG }}
+          files: flux-sites-${{ env.RELEASE_TAG }}.apk
+          generate_release_notes: true

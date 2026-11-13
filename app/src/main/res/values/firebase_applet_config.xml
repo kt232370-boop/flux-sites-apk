@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<resources>
+    <string name="firestore_database_id" translatable="false">ai-studio-android-fluxsite-d7f0aa36-2487-4efc-83de-e9316c2a2e88</string>
+    <string name="recaptcha_site_key" translatable="false">6LdiiB0uAAAAAE08dSkBNfKUlhDr6iiJF6vQ9xLy</string>
+</resources>

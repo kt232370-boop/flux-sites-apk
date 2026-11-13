@@ -1,0 +1,6 @@
+{
+  "name": "Flux Sites",
+  "description": "AI-powered site builder using Gemini to generate responsive web pages, deploy to Firebase-backed site hosting, and unlock Pro hosting tiers with Google Pay.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
